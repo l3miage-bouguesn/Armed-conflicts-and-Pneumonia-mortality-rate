@@ -1,0 +1,393 @@
+---
+title: "Effets des Conflits Armés sur la Mortalité Infantile due à la Pneumonie et Interactions avec les Facteurs Économiques"
+author: "Erreur de segmentation"
+date: "2024-03-24"
+output:
+  html_document: default
+  pdf_document: default
+---
+**<span style="font-size: 20px;">Membre du groupe :</span>**
+
+* BOUGUESSA Nour 
+* KADDOUR Mohamed 
+* SBARTAI Achraf 
+* BENAMMAR Mahmoud
+
+ 
+ **<span style="font-size: 20px;">Table de matière :</span>**
+ 
+ * Introduction
+ * Extraction et nettoyage des données
+ * Distributions du GPI et du PIB
+ * (GPI et PIB) vs Mortalité
+ * Visualisation de taux de mortalité par catégorie [2008-2019]
+ * Visualisation de l’impact des conflits sur le PIB par habitant ET l’effet combiné sur le taux de mortalité [2008-2019]
+ * La matrice de corrélation
+ * Conclusion : Existe-il d’autres facteurs
+ * Sources 
+ 
+
+**<span style="font-size: 20px;">Introduction</span>**
+
+Cette étude examine l'impact des conflits armés sur le taux de mortalité infantile par pneumonie et explore comment les conditions économiques modulent cet effet. Les conflits armés sont une source majeure d'instabilité sociale et économique, ayant un impact profond sur la santé publique. La pneumonie, en tant que principale cause de mortalité parmi les enfants de moins de 5 ans, sert d'indicateur critique pour évaluer l'effet des conflits sur la santé infantile. En outre, cette analyse considère le PIB par habitant comme un indicateur des conditions économiques, pour évaluer son rôle dans la relation entre les conflits et la mortalité due à la pneumonie.
+Méthodologie
+Nous avons utilisé un ensemble de données contenant des informations sur le taux de mortalité infantile par pneumonie, le Global Peace Index (GPI) comme mesure de l'intensité des conflits, le PIB par habitant et la taille de la population. Des analyses statistiques, y compris la corrélation de Pearson, des modèles de régression linéaire, et des visualisations graphiques, ont été employées pour explorer les relations entre ces variables.
+
+
+**<span style="font-size: 20px;">Extraction et nettoyage des données </span>**
+
+Nous avons utilisé un ensemble de données contenant des informations sur le taux de mortalité infantile par pneumonie, le Global Peace Index (GPI) comme mesure de l'intensité des conflits, le PIB par habitant et la taille de la population.
+
+Le nettoyage des données inclut la sélection et le renommage de colonnes spécifiques, la fusion de plusieurs ensembles de données, la conversion de types de données, le traitement des valeurs manquantes et la création de nouvelles variables pour l'analyse, comme le taux de mortalité ajusté.
+```{r echo=FALSE}
+
+suppressPackageStartupMessages({
+  library(readr)
+  library(ggplot2) 
+  library(dplyr)   
+  library(scales)  
+  library(corrplot)
+}) 
+
+# Charger les données
+causes_of_death_children <- read_csv("causes-of-death-in-children.csv",show_col_types = FALSE)
+population_and_demography <- read_csv("population-and-demography.csv",show_col_types = FALSE)
+global_peace_index <- read_csv("Global Peace Index 2023.csv",show_col_types = FALSE)
+gdp_per_capita <-  read_csv("gdp-per-capita-worldbank.csv",show_col_types = FALSE)
+
+# Prétraitement des données
+## Sélection des colonnes pertinentes et préparation des données
+death_pneumonia_children <- causes_of_death_children %>%
+  select(Entity, Year, Pneumonia) %>%
+  rename(Country = Entity, Deaths_Pneumonia_Under5 = Pneumonia)
+
+gpi_selected <- global_peace_index %>%
+  select(Country, Year, Overall_Scores)
+
+population_infantile <- population_and_demography %>%
+  select(Country, Year, `Population_aged_1_to_4_years`) %>%
+  rename(Population_1to4 = `Population_aged_1_to_4_years`)
+
+gdp_data <- gdp_per_capita %>%
+  select(Entity,Year,`GDP per capita`)%>%
+  rename(Country = Entity, gdp_per_capita =`GDP per capita` )
+
+
+# Fusionner les datasets sur 'Country' et 'Year'
+Dataset_final <- merge(death_pneumonia_children, population_infantile, by = c("Country", "Year"))
+Dataset_final <- merge(Dataset_final, gpi_selected, by = c("Country", "Year"))
+Dataset_final <- Dataset_final %>%
+  left_join(gdp_data, by = c("Country", "Year"))
+
+
+# Convertir 'Overall_Scores' en numérique
+Dataset_final$Overall_Scores <- as.numeric(as.character(Dataset_final$Overall_Scores))
+
+
+# Gérer les éventuelles valeurs NA après la conversion
+merged_data <- na.omit(Dataset_final)
+
+
+
+# Ajuster les décès dus à la pneumonie par la population infantile pour obtenir un taux de mortalité
+Dataset_final <- Dataset_final %>%
+  mutate(Pneumonia_Mortality_Rate = Deaths_Pneumonia_Under5 / Population_1to4 * 1000)  # taux pour 1000 enfants
+
+
+Dataset_final <- Dataset_final %>% 
+  filter(!is.na(Overall_Scores))
+
+Dataset_final <- Dataset_final %>% 
+  filter(!is.na(gdp_per_capita))
+
+
+```
+
+
+
+**<span style="font-size: 20px;">Distributions du GPI et du PIB</span>**
+
+Après le nettoyage des données, l'analyse peut se concentrer sur l'interprétation des distributions du GPI et du PIB. 
+-Pour le GPI : nous pouvons examiner la tendance centrale et la dispersion pour évaluer la stabilité globale. Des GPI élevés indiquent moins de paix, potentiellement augmentant le taux de la mortalité infantile par pneumonie. 
+-Pour le PIB : nous recherchons des corrélations avec taux de mortalité infantile par pneumonie, en supposant que des PIB plus élevés correspondent à de meilleurs soins de santé et à des taux de survie plus élevés.
+
+```{r echo=FALSE}
+
+# Distribution du GPI
+# Calculer la moyenne du GPI pour chaque pays
+mean_gpi_by_country <- Dataset_final %>%
+  group_by(Country) %>%
+  summarize(Average_GPI = mean(Overall_Scores, na.rm = TRUE)) 
+
+# Créer un histogramme de la moyenne de GPI par pays
+ggplot(mean_gpi_by_country, aes(x = Average_GPI)) +
+  geom_histogram(fill = "cornflowerblue", bins = 30) +
+  labs(title = "Histogram of Average GPI by Country",
+       x = "Average GPI",
+       y = "Count of Countries") +
+  theme_minimal()
+
+
+# Distribution du PIB par habitant
+# Calculer la moyenne du PIB par habitant pour chaque pays
+mean_gdp_by_country <- Dataset_final %>%
+  group_by(Country) %>%
+  summarize(Average_GDP = mean(gdp_per_capita, na.rm = TRUE))
+
+# Créer un histogramme de la moyenne du PIB par habitant par pays
+ggplot(mean_gdp_by_country, aes(x = Average_GDP)) +
+  geom_histogram(fill = "salmon", bins = 30) +
+  labs(title = "Histogram of Average GDP per Capita by Country",
+       x = "Average GDP per Capita",
+       y = "Count of Countries") +
+  theme_minimal()
+
+```
+
+L'histogramme du GPI montre une distribution des scores moyens de l'indice de paix mondial (Global Peace Index) par pays. Il semble y avoir une concentration plus élevée de pays avec un GPI moyen autour de 2.0, ce qui pourrait suggérer une tendance vers une stabilité modérée dans l'échantillon de pays analysé. Des scores GPI plus élevés indiquent une paix moindre. Ainsi, une concentration autour de cette valeur médiane peut indiquer que de nombreux pays se situent dans une zone intermédiaire de paix/stabilité selon cet indice. La présence de pays à la fois dans les gammes inférieures et supérieures pourrait indiquer une variabilité significative en termes de paix à travers le monde.
+
+
+**<span style="font-size: 20px;"> (GPI et PIB) vs Mortalité </span>**
+
+Pour mieux comprendre l'impact des conflits armés et de la situation économique sur la mortalité infantile due à la pneumonie, nous allons générer des visualisations à partir de nos données nettoyées. Ces graphiques nous aideront à savoir si les conflits et les niveaux économiques sont liés à une augmentation ou une réduction des taux de mortalité infantile. 
+
+En utilisant des méthodes de régression linéaire, nous pourrons évaluer la force et la signification de ces relations, nous fournissant une base pour une analyse statistique plus approfondie
+
+```{r echo=FALSE}
+
+# GPI vs Mortalité par pneumonie
+ggplot(Dataset_final, aes(x = Overall_Scores, y = Pneumonia_Mortality_Rate)) +
+  geom_point(aes(color = Year), alpha = 0.6) +
+  geom_smooth(method = "lm", formula = y ~ x, color = "darkred") +
+  labs(title = "GPI vs Pneumonia Mortality Rate", x = "Global Peace Index", y = "Pneumonia Mortality Rate")
+
+# PIB par habitant vs Mortalité par pneumonie
+ggplot(Dataset_final, aes(x = gdp_per_capita, y = Pneumonia_Mortality_Rate)) +
+  geom_point(aes(color = Year), alpha = 0.6) +
+  geom_smooth(method = "lm", formula = y ~ x, color = "darkgreen") +
+  labs(title = "GDP per Capita vs Pneumonia Mortality Rate", x = "GDP per Capita", y = "Pneumonia Mortality Rate")
+
+
+```
+ANALYSE DE RESULTATS : 
+L'analyse des graphiques indique une corrélation entre le GPI et le taux de mortalité infantile due à la pneumonie, ainsi qu'entre le PIB par habitant et ce même taux. Un GPI élevé, signifiant moins de paix, semble associé à un taux de mortalité plus élevé, ce qui pourrait refléter l'impact négatif des conflits sur les systèmes de santé. Inversement, un PIB par habitant plus élevé est généralement corrélé à un taux de mortalité plus bas, suggérant que de meilleures conditions économiques peuvent favoriser une meilleure santé infantile. Ces tendances sont cohérentes au fil des ans, comme illustré par la diversité des couleurs représentant les différentes années dans les nuages de points
+
+
+**<span style="font-size: 20px;">Visualisation de taux de mortalité par catégorie [2008-2019]</span>**
+
+
+<mark>Utilité boite à moustaches :</mark>
+
+
+Les boîtes à moustaches pour chaque année de 2008 à 2019 sont très utiles pour visualiser la répartition des taux de mortalité infantile dus à la pneumonie en fonction des catégories de GPI et de PIB. Avec de multiples pays dans l'échantillon, ces graphiques permettent de distinguer rapidement où se situent la majorité des observations—la médiane—et de comprendre la variabilité ou la dispersion des données autour de cette médiane à travers les quartiles.
+
+
+**<span style="font-size: 10px;">Par catégorie de GPI </span>**
+
+```{r echo=FALSE}
+
+
+
+# Pour chaque année unique dans le jeu de données
+unique_years <- unique(Dataset_final$Year)
+
+for (year in unique_years) {
+  # Filtrer le jeu de données pour l'année spécifique
+  data_year <- Dataset_final %>% 
+    filter(Year == year) %>%
+    group_by(Country) %>%
+    summarize(Average_GPI = mean(Overall_Scores, na.rm = TRUE),
+              Pneumonia_Mortality_Rate = mean(Pneumonia_Mortality_Rate, na.rm = TRUE))
+  
+  # Définir les catégories de GPI pour l'année spécifique
+  breaks_gpi <- quantile(data_year$Average_GPI, probs = 0:4/4, na.rm = TRUE)
+  data_year$GPI_category <- cut(data_year$Average_GPI, breaks = breaks_gpi, include.lowest = TRUE, labels = c("Low", "Medium-Low", "Medium-High", "High"))
+  
+  # Créer le graphique en boîte pour l'année spécifique
+  p <- ggplot(data_year, aes(x = GPI_category, y = Pneumonia_Mortality_Rate, fill = GPI_category)) +
+    geom_boxplot() +
+    labs(title = paste("Pneumonia Mortality Rate by GPI Category in", year),
+         x = "GPI Category", y = "Pneumonia Mortality Rate") +
+    scale_fill_brewer(palette = "Spectral") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  # Afficher le graphique
+  print(p)
+}
+
+```
+
+**<span style="font-size: 10px;">Par catégorie de GDP </span>**
+
+```{r echo=FALSE}
+
+# Pour chaque année unique dans le jeu de données
+unique_years <- unique(Dataset_final$Year)
+
+for (year in unique_years) {
+  # Filtrer le jeu de données pour l'année spécifique
+  data_year <- Dataset_final %>% 
+    filter(Year == year) %>%
+    group_by(Country) %>%
+    summarize(Average_GDP = mean(gdp_per_capita, na.rm = TRUE),
+              Pneumonia_Mortality_Rate = mean(Pneumonia_Mortality_Rate, na.rm = TRUE))
+  
+  # Définir les catégories de PIB pour l'année spécifique
+  breaks_gdp <- quantile(data_year$Average_GDP, probs = 0:4/4, na.rm = TRUE)
+  data_year$GDP_category <- cut(data_year$Average_GDP, breaks = breaks_gdp, include.lowest = TRUE, labels = c("Low", "Medium-Low", "Medium-High", "High"))
+  
+  # Créer le graphique en boîte pour l'année spécifique
+  p <- ggplot(data_year, aes(x = GDP_category, y = Pneumonia_Mortality_Rate, fill = GDP_category)) +
+    geom_boxplot() +
+    labs(title = paste("Pneumonia Mortality Rate by GDP Category in", year),
+         x = "GDP per Capita Category", y = "Pneumonia Mortality Rate") +
+    scale_fill_brewer(palette = "Spectral") +
+    theme_minimal() +
+    theme(legend.position = "none")
+  
+  # Afficher le graphique
+  print(p)
+}
+
+```
+
+
+
+**<span style="font-size: 20px;">Visualisation de l'impact des conflits sur le PIB par habitant ET l'effet combiné sur le taux de mortalité [2008-2019]  </span>** 
+
+On utilise des régressions linéaires chaque année pour mesurer comment les conflits (via le GPI) et l'économie (à travers le PIB par habitant) affectent le taux de mortalité infantile par pneumonie. En analysant année par année, nous pouvons voir de façon détaillée comment ces facteurs changent avec le temps .
+
+```{r echo=FALSE}
+# Obtenir une liste des années uniques
+unique_years <- unique(Dataset_final$Year)
+
+# Itérer sur les années et créer un modèle de régression pour chacune
+for (year in unique_years) {
+  # Filtrer les données pour l'année courante
+  data_for_year <- Dataset_final %>% filter(Year == year)
+  
+  # Le modèle de régression pour évaluer l'impact du GPI sur le PIB pour l'année courante
+  model_pib_year <- lm(gdp_per_capita ~ Overall_Scores, data = data_for_year)
+  
+  # Visualiser la relation entre GPI et PIB pour l'année courante
+  p1 <- ggplot(data_for_year, aes(x = Overall_Scores, y = gdp_per_capita)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = TRUE, color = "blue", formula = y ~ x) + # Specified formula here
+    labs(title = paste("Impact of Armed Conflicts on GDP per Capita in", year),
+         x = "Global Peace Index (Overall Scores)", y = "GDP per Capita") +
+    theme_minimal()
+  print(p1)
+  
+  # Le modèle de régression pour examiner l'impact indirect des conflits sur la mortalité infantile via le PIB pour l'année courante
+  model_mortality_year <- lm(Pneumonia_Mortality_Rate ~ Overall_Scores + gdp_per_capita, data = data_for_year)
+  
+  # Visualiser l'impact combiné des conflits et du PIB sur la mortalité infantile pour l'année courante
+  p2 <- ggplot(data_for_year, aes(x = Overall_Scores, y = Pneumonia_Mortality_Rate, color = gdp_per_capita)) +
+    geom_point(alpha = 0.6) +
+    geom_smooth(method = "lm", se = TRUE, aes(group = 1), color = "darkgrey", formula = y ~ x) + # Specified formula here
+    labs(title = paste("Combined Impact of Armed Conflicts and GDP on Infant Mortality Rate in", year),
+         x = "Global Peace Index (Overall Scores)", y = "Infant Mortality Rate") +
+    theme_minimal() +
+    scale_color_gradient(low = "green", high = "red")
+  print(p2)
+}
+
+
+
+```
+Les graphiques obtenus montre comment le GPI et le PIB influencent conjointement le taux de mortalité infantile par pneumonie, avec une attention particulière sur la manière dont ces relations peuvent varier d'une année à l'autre.
+mais il présente aussi une anomalie évidente : la ligne de régression prédit des valeurs négatives pour le PIB par habitant à mesure que l'indice de paix global (GPI) augmente, ce qui n'est pas logique ni économiquement possible. Le PIB par habitant, qui mesure la prospérité économique moyenne d'une nation, ne peut pas être négatif.
+Cette situation pourrait être due l'utilisation inappropriée d'un modèle linéaire lorsque les données nécessitent un modèle non linéaire pour une représentation plus précise de la relation entre GPI et PIB.
+
+
+**<span style="font-size: 20px;">La matrice de corrélation </span>** 
+
+```{r echo=FALSE}
+
+# Calcul de la matrice de corrélation
+correlation_matrix <- cor(Dataset_final[,c("Overall_Scores", "gdp_per_capita", "Pneumonia_Mortality_Rate")], use = "complete.obs")
+
+# Affichage de la matrice de corrélation
+print(correlation_matrix)
+
+# Pour une meilleure visualisation, vous pouvez utiliser la bibliothèque corrplot
+if(!require(corrplot)) install.packages("corrplot")
+library(corrplot)
+
+# Visualisation de la matrice de corrélation
+corrplot(correlation_matrix, method = "circle", type = "upper", tl.col = "black",tl.srt=45)
+
+
+```
+
+<mark>Analyse du resultat :</mark>
+
+ La matrice de corrélation illustre visuellement la force et la direction des relations entre le score global de paix , le PIB par habitant et le taux de mortalité due à la pneumonie. Donc :
+Une corrélation négative modérée entre le GPI et le PIB par habitant suggère que des scores GPI plus élevés (indiquant moins de paix) tendent à coïncider avec un PIB par habitant inférieur.
+Une corrélation négative entre le GPI et le taux de mortalité par pneumonie indique que des niveaux de paix plus bas pourraient être associés à des taux de mortalité plus élevés.
+Le PIB par habitant et le taux de mortalité par pneumonie semblent également être négativement corrélés, ce qui implique que des PIB plus élevés pourraient correspondre à des taux de mortalité inférieurs.
+
+
+**<span style="font-size: 20px;">Existe-il d'autres facteurs </span>** 
+
+Cetta dernière partie sert de complément à notre étude, en introduisant des comparaisons aléatoires qui mettent en lumière des insights variés sur l'influence des conditions socio-économiques et des conflits sur la mortalité infantile par pneumonie.
+
+```{r echo=FALSE}
+
+# Calculer le GPI moyen pour chaque pays sur toutes les années
+gpi_means <- Dataset_final %>%
+  group_by(Country) %>%
+  summarize(Mean_GPI = mean(Overall_Scores, na.rm = TRUE)) %>%
+  filter(Mean_GPI > 2)
+
+# S'assurer qu'il y a assez de pays pour échantillonner
+if(nrow(gpi_means) >= 2) {
+  # Sélectionner aléatoirement deux pays avec des GPI moyens supérieurs à 2
+  selected_countries <- sample(gpi_means$Country, size = 2)
+  
+  # Filtrer les données pour inclure seulement ces pays
+  data_subset <- Dataset_final %>%
+    filter(Country %in% selected_countries)
+  
+  # Créer un graphique de série temporelle pour ces pays
+  ggplot(data_subset, aes(x = Year, y = Pneumonia_Mortality_Rate, group = Country, color = Country)) +
+    geom_line() +
+    geom_point() +
+    theme_minimal() +
+    labs(title = "Comparaison du taux de mortalité infantile entre pays avec GPI similaire",
+         subtitle = paste("Pays sélectionnés aléatoirement :", paste(selected_countries, collapse = ", ")),
+         x = "Année", y = "Taux de mortalité infantile par pneumonie") +
+    scale_x_continuous(breaks = seq(min(data_subset$Year), max(data_subset$Year), by = 1))
+} else {
+  print("Pas assez de pays avec un GPI moyen supérieur à 2 pour l'échantillonnage.")
+}
+
+
+```
+
+Cette visualisation sert de point de départ pour de plus amples recherches. Cette approche randomisée met en évidence la variation des tendances sanitaires même parmi les pays qui partagent des indices de paix comparables, suggérant que d'autres facteurs, tels que les politiques de santé, l'infrastructure, et les conditions socio-économiques, jouent un rôle crucial dans la santé des enfants. Les résultats encouragent une analyse plus nuancée des données, explorant comment et pourquoi ces différences existent, et quelles leçons peuvent être tirées pour améliorer la santé infantile au-delà des frontières géographiques et des classements de paix.
+
+**<span style="font-size: 20px;">Sources </span>** 
+
+
+* Pneumonia — no child should die from a disease we can prevent
+  * https://ourworldindata.org/child-deaths-from-pneumonia
+
+
+
+* Childhood pneumonia in humanitarian emergencies in low- and middle-income countries: A systematic scoping review
+  * https://jogh.org/2022/jogh-12-10001 
+
+
+
+* Uppsala Conflict Data Program
+  * https://ucdp.uu.se/ 
+
+
+* Chocs Économiques et Conflits Armés
+  * https://ses.ens-lyon.fr/articles/chocs-economiques-et-conflits-armes 
+
+
+* Overall GPI Score
+  * https://www.visionofhumanity.org/maps/#/
